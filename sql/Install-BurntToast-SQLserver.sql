@@ -458,17 +458,19 @@ GO
 
 WHILE 1 = 1
 BEGIN
+    ;WITH MessagesWithDeliveryHistory AS (
+        SELECT DISTINCT d.MessageId
+        FROM dbo.ToastDelivery d
+    )
     UPDATE TOP (1000) m
     SET DisplayMode = 'AppDeployToolkit'
     FROM dbo.ToastMessage m
+    LEFT JOIN MessagesWithDeliveryHistory h
+        ON h.MessageId = m.MessageId
     WHERE m.DisplayMode IS NULL
        OR (
             m.DisplayMode <> 'AppDeployToolkit'
-            AND NOT EXISTS (
-                SELECT 1
-                FROM dbo.ToastDelivery d
-                WHERE d.MessageId = m.MessageId
-            )
+            AND h.MessageId IS NULL
        );
 
     IF @@ROWCOUNT = 0
