@@ -42,7 +42,6 @@ BEGIN
                 SELECT 1
                 FROM dbo.ToastDelivery d
                 WHERE d.MessageId = m.MessageId
-                  AND d.Status IN ('Delivered','Failed','Cancelled')
             )
        );
 
@@ -302,7 +301,7 @@ BEGIN
            m.ButtonArguments,
            m.ButtonActivationType,
            m.Scenario,
-           m.DisplayMode,
+           CAST('AppDeployToolkit' AS varchar(20)) AS DisplayMode,
            m.RepeatIntervalSeconds,
            m.RepeatCount,
            m.ExpiresUtc,

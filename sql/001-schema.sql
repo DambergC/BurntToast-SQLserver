@@ -294,7 +294,7 @@ BEGIN
            m.ButtonArguments,
            m.ButtonActivationType,
            m.Scenario,
-           m.DisplayMode,
+           CAST('AppDeployToolkit' AS varchar(20)) AS DisplayMode,
            m.RepeatIntervalSeconds,
            m.RepeatCount,
            m.ExpiresUtc,

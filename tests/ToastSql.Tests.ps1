@@ -780,9 +780,9 @@ function Show-InstallationPrompt {
             $buttonScriptText | Should -Match "DisplayMode must be AppDeployToolkit"
             $buttonScriptText | Should -Match "ALTER TABLE dbo\.ToastMessage ADD Scenario varchar\(20\) NULL"
             $buttonScriptText | Should -Match "ALTER TABLE dbo\.ToastMessage ADD DisplayMode varchar\(20\) NULL"
-            $buttonScriptText | Should -Match "d\.Status IN \('Delivered','Failed','Cancelled'\)"
+            $buttonScriptText | Should -Match "AND NOT EXISTS \("
             $buttonScriptText | Should -Match "m\.Scenario"
-            $buttonScriptText | Should -Match "m\.DisplayMode"
+            $buttonScriptText | Should -Match "CAST\('AppDeployToolkit' AS varchar\(20\)\) AS DisplayMode"
             $buttonScriptText | Should -Match "m\.AppLogoBytes"
             $buttonScriptText | Should -Match "m\.HeroImageBytes"
             $schemaScriptText | Should -Match "DisplayMode must be AppDeployToolkit"
@@ -801,7 +801,7 @@ function Show-InstallationPrompt {
             $installScriptText | Should -Match "CREATE OR ALTER FUNCTION dbo\.ufn_ToastMessageLocal"
             $installScriptText | Should -Match "CREATE OR ALTER VIEW dbo\.vw_ToastDeliveryLocal"
             $installScriptText | Should -Match "DisplayMode must be AppDeployToolkit"
-            $installScriptText | Should -Match "d\.Status IN \('Delivered','Failed','Cancelled'\)"
+            $installScriptText | Should -Match "AND NOT EXISTS \("
             $installScriptText | Should -Match "CURRENT_TIMEZONE\(\)"
         }
     }
