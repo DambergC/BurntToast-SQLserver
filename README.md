@@ -1,16 +1,12 @@
 # BurntToast-SQLserver
 
-Gruppbaserade Windows-notiser med PowerShell och Microsoft SQL Server. Projektet kan nu visa meddelanden via tre visningslägen:
+Gruppbaserade SQL-köade notifieringar för Windows-klienter med **AppDeployToolkit** som enda stödda presentationslager.
 
-- `BurntToast` – native Windows-toast (standard)
-- `Wpf` – egen kvittensruta
-- `AppDeployToolkit` – PSAppDeployToolkit/PSADT-prompt i användarens interaktiva session
+Projektet behåller SQL-kö, klientregistrering, polling, leasing, repeat-logik och leveranskvittens, men klienten visar nu meddelanden enbart via `Show-ADTInstallationPrompt` / `Show-InstallationPrompt`.
 
 ## Quick start
 
-Detta är den rekommenderade snabbstarten för både nya installationer och uppgraderingar.
-
-1. Kör det konsoliderade SQL-skriptet i databasen som ska användas:
+1. Kör det konsoliderade SQL-skriptet i databasen:
 
 ```sql
 :r sql/Install-BurntToast-SQLserver.sql
@@ -22,13 +18,15 @@ Detta är den rekommenderade snabbstarten för både nya installationer och uppg
 Copy-Item .\config\config.example.psd1 .\config\config.psd1
 ```
 
-3. Fyll i `config/config.psd1` med SQL Server, databas och klientgrupper.
+3. Fyll i SQL-inställningar, klientnamn/grupper och `AppDeployToolkitModulePath`.
 
 4. Registrera klienten:
 
 ```powershell
 .\src\Client\Start-ToastClient.ps1 -ConfigPath .\config\config.psd1 -Register
 ```
+
+> `-Register` registrerar klienten och fortsätter sedan polling-loopen. Använd `-Once` för att registrera och avsluta direkt efter en enda körning.
 
 5. Köa ett testmeddelande:
 
@@ -40,76 +38,44 @@ Copy-Item .\config\config.example.psd1 .\config\config.psd1
   -Body 'Detta är ett test.'
 ```
 
-6. Kör klienten i den inloggade användarens session:
+6. Kör klienten i användarens session:
 
 ```powershell
 .\src\Client\Start-ToastClient.ps1 -ConfigPath .\config\config.psd1 -Once
 ```
 
-7. För kontinuerlig polling används:
+7. För kontinuerlig polling:
 
 ```powershell
 .\src\Client\Start-ToastClient.ps1 -ConfigPath .\config\config.psd1 -PollSeconds 30
 ```
 
-`deploy/Register-ToastClientTask.ps1` registrerar ett logon-task som startar PowerShell med `-STA`, vilket krävs för `Wpf` och rekommenderas för `AppDeployToolkit`.
-
-## SQL-skript
-
-### Rekommenderat
-
-- `sql/Install-BurntToast-SQLserver.sql`
-  - skapar saknade bastabeller/index
-  - applicerar repeat-/lease-logik
-  - applicerar knapp-/display-mode-stöd
-  - applicerar lokal tidsrapportering
-  - är avsett att fungera både för nya installationer och uppgraderingar
-
-### Legacy / avancerad migrering
-
-De individuella skripten finns kvar för bakåtkompatibilitet och kontrollerade stegvisa uppgraderingar:
-
-- `sql/001-schema.sql`
-- `sql/002-toast-design-repeat.sql`
-- `sql/003-toast-button.sql`
-- `sql/004-local-time-reporting.sql`
-
-Om en befintlig installation redan använder den äldre ordningen kan du fortsatt köra skripten separat i samma ordning som ovan.
+`deploy/Register-ToastClientTask.ps1` registrerar ett logon-task som startar PowerShell med `-STA`. ADT-prompten kräver inte längre WPF-koden som tidigare fanns i repot, men `-STA` är fortfarande ett bra standardval för interaktiva klientstarter.
 
 ## Arkitektur
 
 - Administratören köar ett meddelande till en grupp i SQL Server.
 - Klienterna pollar SQL Server över TCP 1433.
-- Klientscriptet körs i användarens interaktiva session och visar meddelandet lokalt.
-- Leveransstatus sparas i SQL Server.
+- Klientscriptet körs i användarens interaktiva session och visar meddelandet via AppDeployToolkit.
+- Leveransstatus sparas i SQL Server via lease-/acknowledgement-flödet.
 
-SQL Server används alltså som kö- och statuslager, inte som presentationskanal.
+SQL Server är alltså kö- och statuslager, inte presentationskanal.
 
 ## Förutsättningar
 
-### Server / administrationssida
+### Server / administration
 
 - Windows PowerShell 5.1 eller PowerShell 7
 - SQL Server
 - rättigheter att köra SQL-installationsskript och att köa meddelanden
 - nätverksåtkomst till SQL Server
 
-### Klientsida
+### Klient
 
 - Windows PowerShell 5.1 eller PowerShell 7
 - interaktiv användarsession (inte Session 0 / `SYSTEM`)
 - nätverksåtkomst till SQL Server på TCP 1433
-- `BurntToast` installerat eller tillgängligt från intern PowerShell-källa **om** klienten ska visa `DisplayMode BurntToast`
-- lokalt paketerad och versionslåst `PSAppDeployToolkit`/`AppDeployToolkit` **om** klienten ska visa `DisplayMode AppDeployToolkit`
-- `-STA` vid körning för `Wpf`, och rekommenderat även för `AppDeployToolkit`
-
-## Installation
-
-1. Kör `sql/Install-BurntToast-SQLserver.sql`.
-2. Ge ett SQL-login eller en Windows-grupp minsta nödvändiga rättigheter.
-3. Kopiera `config/config.example.psd1` till `config/config.psd1`.
-4. Registrera klienter/grupper med `src/Client/Start-ToastClient.ps1 -Register`.
-5. Kör klienten i användarsessionen, manuellt eller via schemalagd uppgift.
+- en **lokalt paketerad och versionslåst** kopia av `PSAppDeployToolkit` / `AppDeployToolkit`
 
 ## Konfiguration
 
@@ -126,8 +92,7 @@ Exempel:
     SqlCredential = $null
     ClientName = $null
     ClientGroups = @('IT-TEST')
-    InternalPowerShellRepository = $null
-    AppDeployToolkitModulePath = $null
+    AppDeployToolkitModulePath = 'C:\ToastSql\Dependencies\PSAppDeployToolkit\4.1.8'
     Encrypt = $true
     TrustServerCertificate = $false
     ConnectTimeoutSeconds = 15
@@ -135,23 +100,76 @@ Exempel:
 }
 ```
 
-Viktiga inställningar:
+### `AppDeployToolkitModulePath`
 
-- `InternalPowerShellRepository`
-  - valfri intern PowerShell-källa som bara används när klienten faktiskt behöver ladda `BurntToast`
-  - gör att `BurntToast` inte längre måste installeras vid klientstart om inga BurntToast-meddelanden visas
-- `AppDeployToolkitModulePath`
-  - lokal sökväg till en versionslåst PSAppDeployToolkit/AppDeployToolkit-paketering
-  - kan peka på manifestfil, modulfil eller en katalog som innehåller exempelvis `PSAppDeployToolkit.psd1` eller `PSAppDeployToolkit.psm1`
-  - används bara när klienten faktiskt behöver visa `DisplayMode AppDeployToolkit`
+- obligatorisk för klientkörning när `Show-ADTInstallationPrompt` / `Show-InstallationPrompt` inte redan finns laddad i sessionen
+- kan peka på en modulmanifestfil (`.psd1`), modulfil (`.psm1`) eller en katalog som innehåller PSAppDeployToolkit
+- bör peka på en versionslåst lokal paketering, inte på dynamisk nedladdning vid logon
 
-## Projektöversikt
+Exempel:
 
-- `src/Server/Send-ToastMessage.ps1` – köar meddelanden till SQL Server
-- `src/Client/Start-ToastClient.ps1` – pollar SQL Server och visar meddelanden
-- `src/Module/ToastSql.psm1` – SQL-stöd, validering, rendering och display-mode-logik
-- `deploy/Register-ToastClientTask.ps1` – registrerar schemalagd klientstart med `-STA`
-- `sql/Install-BurntToast-SQLserver.sql` – konsoliderat SQL-installations-/uppgraderingsskript
+```powershell
+AppDeployToolkitModulePath = 'C:\ToastSql\Dependencies\PSAppDeployToolkit\4.1.8'
+AppDeployToolkitModulePath = 'C:\ToastSql\Dependencies\PSAppDeployToolkit\4.1.8\PSAppDeployToolkit.psd1'
+```
+
+## AppDeployToolkit-beteende
+
+### Titel, Subtitle och meddelandetext
+
+Klienten mappar innehållet till ADT-prompten så här:
+
+- `Body` skickas som promptens `Message`
+- när promptvarianten använder ett separat `Title`-fält skickas toastens titel dit
+- `Subtitle` skickas när promptkommandot stöder det **och** varianten behöver det, eller när titeln saknas och en säker fallback måste användas
+- när `Subtitle` behöver fyllas används toastens titel om den finns; annars används första icke-tomma raden från `Body`
+- om både `Title` och `Body` skulle sakna användbar text används fallback-värdet `Notification`
+- klienten detekterar parameterstöd innan något skickas, så äldre `Show-InstallationPrompt`-varianter inte får okända parametrar
+
+### Action-knapp / protokollknapp
+
+Den nuvarande ADT-integrationen stöder **en** valfri action-knapp via vänster knapp i prompten.
+
+Krav:
+
+- `ButtonText` måste anges
+- `ButtonActivationType` måste vara `Protocol` eller `Dismiss`
+- `ButtonArguments` måste vara en **absolut** URI när `ButtonActivationType = 'Protocol'`
+- endast dessa URI-scheman tillåts: `http`, `https`, `mailto`
+
+Exempel:
+
+```powershell
+.\src\Server\Send-ToastMessage.ps1 `
+  -ConfigPath .\config\config.psd1 `
+  -GroupName 'IT-TEST' `
+  -Title 'Portal uppdaterad' `
+  -Body 'Klicka på knappen för att öppna intranätets driftstatus.' `
+  -ButtonText 'Öppna status' `
+  -ButtonArguments 'https://status.contoso.example/' `
+  -ButtonActivationType 'Protocol'
+```
+
+```powershell
+.\src\Server\Send-ToastMessage.ps1 `
+  -ConfigPath .\config\config.psd1 `
+  -GroupName 'IT-TEST' `
+  -Title 'Bekräfta läsning' `
+  -Body 'Stäng prompten via vänster knapp.' `
+  -ButtonText 'Stäng' `
+  -ButtonActivationType 'Dismiss'
+```
+
+Beteende:
+
+- om användaren klickar action-knappen och det är en `Protocol`-knapp öppnas URI:n via `Start-Process`
+- om användaren klickar acknowledge-knappen registreras leveransen utan att någon URI öppnas
+- om protokollstart misslyckas returneras felet tydligt och meddelandet markeras inte som tyst kvitterat
+
+Begränsningar:
+
+- relativa URL:er som `www.example.com` eller `/path` stöds inte
+- andra scheman, till exempel `file:` eller anpassade interna URI-scheman, blockeras med avsikt
 
 ## `src/Server/Send-ToastMessage.ps1`
 
@@ -181,14 +199,12 @@ Syntax:
   [-ButtonArguments <string>] `
   [-ButtonActivationType <string>] `
   [-Scenario <string>] `
-  [-DisplayMode <string>]
+  [-DisplayMode AppDeployToolkit]
 ```
 
-`-DisplayMode` stöder nu:
+`-DisplayMode` accepterar nu endast `AppDeployToolkit` och defaultar till det värdet.
 
-- `BurntToast`
-- `Wpf`
-- `AppDeployToolkit`
+Bild-, sound-, urgent- och scenariofält ligger kvar i SQL-kontraktet för kompatibilitet och validering, men den nuvarande ADT-prompten använder främst titel, brödtext och eventuell knapp.
 
 ## `src/Client/Start-ToastClient.ps1`
 
@@ -198,271 +214,57 @@ Syntax:
 .\src\Client\Start-ToastClient.ps1 -ConfigPath <string> [-Register] [-Once] [-PollSeconds <int>]
 ```
 
-Klienten laddar nu beroenden **lazy** per visningsläge:
+Klienten:
 
-- `BurntToast` laddas bara när ett `BurntToast`-meddelande ska visas.
-- `AppDeployToolkit` laddas bara när ett `AppDeployToolkit`-meddelande ska visas.
-- `Wpf` kräver inga externa PowerShell-moduler.
+- registrerar dator/grupptillhörighet i SQL när `-Register` används
+- pollar `dbo.usp_GetPendingToast`
+- visar meddelandet via AppDeployToolkit
+- kvitterar leverans via `dbo.usp_RecordToastDelivery`
+- retry:ar leveranskvittens för tillfälliga transport-/timeoutfel
 
-Det gör att AppDeployToolkit-only-klienter inte behöver `BurntToast` installerat för att fungera.
+## SQL-skript
 
-## `deploy/Register-ToastClientTask.ps1`
+### Rekommenderat
 
-Exempel:
+- `sql/Install-BurntToast-SQLserver.sql`
+  - skapar saknade bastabeller/index
+  - applicerar repeat-/lease-logik
+  - applicerar knapp-/display-mode-stöd
+  - applicerar lokal tidsrapportering
+  - normaliserar `DisplayMode` till `AppDeployToolkit` för `NULL`-värden och rader som fortfarande saknar leveranshistorik vid uppgradering
 
-```powershell
-.\deploy\Register-ToastClientTask.ps1 `
-  -TaskName 'BurntToast SQL Client' `
-  -ScriptPath 'C:\ToastSql\Client\Start-ToastClient.ps1' `
-  -ConfigPath 'C:\ToastSql\Client\config.psd1'
-```
+### Legacy / stegvis uppgradering
 
-Tasket startar `powershell.exe` med `-STA`.
+- `sql/001-schema.sql`
+- `sql/002-toast-design-repeat.sql`
+- `sql/003-toast-button.sql`
+- `sql/004-local-time-reporting.sql`
 
-## Anpassa toastens innehåll
+## Migration från äldre visningslägen
 
-Exempel med designmetadata:
+Den här refaktorn tar bort stöd för:
 
-```powershell
-.\src\Server\Send-ToastMessage.ps1 `
-  -ConfigPath .\config\config.psd1 `
-  -GroupName 'IT-TEST' `
-  -Title 'Underhåll i kväll' `
-  -Body 'VPN-tjänsten startas om 22:00.' `
-  -AppLogoPath '\\fileserver\toast-assets\logo.png' `
-  -HeroImagePath '\\fileserver\toast-assets\maintenance.jpg' `
-  -Scenario Reminder `
-  -Sound Reminder `
-  -Urgent
-```
+- `BurntToast`
+- `Wpf`
 
-Notera:
+Praktiska följder:
 
-- `AppLogoPath` och `HeroImagePath` kräver att **klientdatorn** kan läsa sökvägen.
-- `AppLogoFilePath` och `HeroImageFilePath` läser bilden på servern och lagrar bytes i SQL Server.
-- `AppLogoBytes`/`HeroImageBytes` stöds också direkt.
-- Stödda content types för binära bilder är `image/png`, `image/jpeg`, `image/gif` och `image/bmp`.
-- Maximal binär bildstorlek är 5 MB per bild.
+- klientkonfigurationen använder inte längre `InternalPowerShellRepository`
+- nya köade meddelanden ska använda `DisplayMode AppDeployToolkit` eller lämna parametern på default
+- uppgraderingsskripten normaliserar gamla `DisplayMode`-värden till `AppDeployToolkit` bara för meddelanden utan leveranshistorik; hämtade meddelanden levereras ändå som ADT i klientflödet
+- tester och klientlogik för WPF/BurntToast är borttagna
 
-## Visningslägen
+## Testning
 
-### `BurntToast` (standard)
-
-Native Windows-toast med Notification Center-stöd, ljud, scenarier, bilder, `Urgent` och inbyggda BurntToast-knappar.
+Kör repositoryts Pester-svit:
 
 ```powershell
-.\src\Server\Send-ToastMessage.ps1 `
-  -ConfigPath .\config\config.psd1 `
-  -GroupName 'IT-TEST' `
-  -Title 'Påminnelse' `
-  -Body 'Detta visas som vanlig Windows-toast.' `
-  -DisplayMode BurntToast `
-  -Scenario Reminder `
-  -ButtonText 'Stäng' `
-  -ButtonActivationType Dismiss
+Invoke-Pester -Path .\tests\ToastSql.Tests.ps1
 ```
 
-### `Wpf`
+Fokus i testsviten ligger nu på:
 
-Egen topmost-kvittensruta i användarens session. Ingen Notification Center-integration. Fönstret kan ligga kvar tills användaren bekräftar.
-
-```powershell
-.\src\Server\Send-ToastMessage.ps1 `
-  -ConfigPath .\config\config.psd1 `
-  -GroupName 'IT-TEST' `
-  -Title 'Bekräftelse krävs' `
-  -Body 'Detta meddelande ligger kvar tills användaren bekräftar det.' `
-  -DisplayMode Wpf `
-  -ButtonText 'Öppna ärende' `
-  -ButtonArguments 'https://status.example.se/ticket/12345' `
-  -ButtonActivationType Protocol
-```
-
-### `AppDeployToolkit`
-
-Visar en PSAppDeployToolkit-prompt i användarens interaktiva session. Detta är ett bra alternativ när man vill ha en standardiserad dialog istället för en native Windows-toast.
-
-```powershell
-.\src\Server\Send-ToastMessage.ps1 `
-  -ConfigPath .\config\config.psd1 `
-  -GroupName 'IT-TEST' `
-  -Title 'Bekräftelse krävs' `
-  -Body 'Läs informationen och bekräfta i dialogen.' `
-  -DisplayMode AppDeployToolkit
-```
-
-Exempel med säker protokollknapp:
-
-```powershell
-.\src\Server\Send-ToastMessage.ps1 `
-  -ConfigPath .\config\config.psd1 `
-  -GroupName 'IT-TEST' `
-  -Title 'Ny rutin publicerad' `
-  -Body 'Öppna dokumentationen eller bekräfta direkt i prompten.' `
-  -DisplayMode AppDeployToolkit `
-  -ButtonText 'Öppna dokumentation' `
-  -ButtonArguments 'https://intra.example.test/rutiner/toastsql' `
-  -ButtonActivationType Protocol
-```
-
-Exempel med frivillig dismiss-knapp:
-
-```powershell
-.\src\Server\Send-ToastMessage.ps1 `
-  -ConfigPath .\config\config.psd1 `
-  -GroupName 'IT-TEST' `
-  -Title 'Information' `
-  -Body 'Du kan stänga prompten via extraknappen eller bekräfta normalt.' `
-  -DisplayMode AppDeployToolkit `
-  -ButtonText 'Stäng prompt' `
-  -ButtonActivationType Dismiss
-```
-
-## Skillnader och begränsningar per visningsläge
-
-| Funktion | BurntToast | Wpf | AppDeployToolkit |
-|---|---|---|---|
-| Windows Notification Center | Ja | Nej | Nej |
-| Native Windows-toast | Ja | Nej | Nej |
-| Kräver extern modul | BurntToast | Nej | PSAppDeployToolkit/AppDeployToolkit |
-| Kräver interaktiv användarsession | Ja | Ja | Ja |
-| Kräver `-STA` | Rekommenderat | Ja | Rekommenderat/krävs i praktiken |
-| Hero image per meddelande | Ja | Ja | Nej |
-| Native toast-scenarier | Ja | Nej | Nej |
-| Ljud/Sound | Ja | Nej | Nej |
-| `Urgent` | Ja | Nej | Nej |
-| Knapp som öppnar säker URI | Ja | Ja (`http`,`https`,`mailto`) | Ja (`http`,`https`,`mailto`) |
-| Dismiss-knapp | Ja | Ja | Ja |
-
-AppDeployToolkit-begränsningar som **inte** emuleras tyst:
-
-- ingen Windows Notification Center-integrering
-- inga BurntToast-scenarier (`Reminder`, `Alarm`, `IncomingCall` används inte som native-scenarier)
-- inget per-meddelande-ljud via `Sound`
-- ingen per-meddelande-hero image rendering
-- ingen `Urgent`-mappning
-
-Praktiskt betyder det att `Title`, `Body`, kvittens och valfri säker protokoll-/dismiss-knapp stöds i `AppDeployToolkit`, medan mer avancerad BurntToast-specifik toast-funktionalitet kräver `DisplayMode BurntToast`.
-
-## Knapphantering
-
-`ButtonActivationType` stöder fortsatt:
-
-- `Protocol`
-- `Dismiss`
-
-För `AppDeployToolkit` och `Wpf` används en säker URI-policy för protokollknappar:
-
-- tillåtet: `http`, `https`, `mailto`
-- blockerat: t.ex. `file`, `ftp`, egna otestade scheman och andra osäkra mål
-
-`BurntToast` behåller befintligt beteende och server-/SQL-validering för absoluta URI:er.
-
-## Upprepade meddelanden
-
-Ett meddelande är fortfarande engångsvisning per klient när repeat-parametrar utelämnas.
-
-```powershell
-.\src\Server\Send-ToastMessage.ps1 `
-  -ConfigPath .\config\config.psd1 `
-  -GroupName 'IT-TEST' `
-  -Title 'Standup om 10 minuter' `
-  -Body 'Teams-rummet öppnas nu.' `
-  -RepeatIntervalMinutes 5 `
-  -RepeatCount 3 `
-  -ExpiresUtc (Get-Date).AddMinutes(20)
-```
-
-## Lokal tidsrapportering
-
-`sql/004-local-time-reporting.sql` och det konsoliderade skriptet skapar:
-
-- `dbo.vw_ToastMessageLocal`
-- `dbo.vw_ToastDeliveryLocal`
-- `dbo.ufn_ToastMessageLocal(@TimeZoneName, @ServerTimeZoneName)`
-- `dbo.ufn_ToastDeliveryLocal(@TimeZoneName, @ServerTimeZoneName)`
-
-`sql/002-toast-design-repeat.sql` migrerar även äldre UTC-lagrade rader till serverns lokala tid vid uppgradering när det behövs.
-
-## Rekommenderade paketlayouter
-
-### Serverpaket
-
-Exempel:
-
-```text
-C:\ToastSql\Server\
-├── config\config.psd1
-├── sql\Install-BurntToast-SQLserver.sql
-├── src\Module\ToastSql.psm1
-└── src\Server\Send-ToastMessage.ps1
-```
-
-### Klientpaket – BurntToast + Wpf
-
-```text
-C:\ToastSql\Client\
-├── config\config.psd1
-├── deploy\Register-ToastClientTask.ps1
-├── src\Client\Start-ToastClient.ps1
-└── src\Module\ToastSql.psm1
-```
-
-`BurntToast` installeras då antingen i förväg eller via `InternalPowerShellRepository` när klienten faktiskt behöver visa ett BurntToast-meddelande.
-
-### Klientpaket – AppDeployToolkit
-
-```text
-C:\ToastSql\Client\
-├── config\config.psd1
-├── deploy\Register-ToastClientTask.ps1
-├── src\Client\Start-ToastClient.ps1
-├── src\Module\ToastSql.psm1
-└── dependencies\PSAppDeployToolkit\4.1.7\
-    ├── PSAppDeployToolkit.psd1
-    └── ...övriga toolkitfiler...
-```
-
-Exempelkonfiguration:
-
-```powershell
-AppDeployToolkitModulePath = 'C:\ToastSql\Client\dependencies\PSAppDeployToolkit\4.1.7'
-```
-
-Du kan även peka direkt på manifestfilen:
-
-```powershell
-AppDeployToolkitModulePath = 'C:\ToastSql\Client\dependencies\PSAppDeployToolkit\4.1.7\PSAppDeployToolkit.psd1'
-```
-
-## Versionslåsning, paketering och compliance
-
-- Paketera PSAppDeployToolkit lokalt tillsammans med klientdistributionen eller leverera det via intern, kontrollerad programvarudistribution.
-- Peka `AppDeployToolkitModulePath` till en **versionslåst** kopia.
-- Ladda inte ned PSAppDeployToolkit dynamiskt vid användarens logon.
-- Commita inte tredjepartsbinärer i detta repository om ni inte redan har en etablerad intern process för det.
-- Följ PSAppDeployToolkits egen licens och era interna compliance-/godkännandeprocesser innan ni distribuerar paketet vidare.
-
-## Säkerhet
-
-- Lägg aldrig lösenord i repo eller konfigurationsfiler.
-- Använd `Encrypt=True` och korrekt certifikatvalidering i produktion.
-- Begränsa brandväggen så att bara klientnät får nå SQL Server.
-- Använd least-privilege-konton.
-- Behåll parametriserade SQL-anrop.
-- Planera för databasstorlek om binära bilder används ofta.
-
-## Felsökning
-
-```powershell
-Test-NetConnection sql01.example.test -Port 1433
-Get-Module -ListAvailable BurntToast
-Get-ChildItem 'C:\ToastSql\Client\dependencies\PSAppDeployToolkit' -Recurse
-```
-
-Om SQL-anslutningen fungerar men ingen notis syns:
-
-- kontrollera att klientscriptet körs som den inloggade användaren
-- kontrollera att schemalagd uppgift eller manuell start använder `-STA`
-- kontrollera att `BurntToast` kan laddas när `DisplayMode BurntToast` används
-- kontrollera att `AppDeployToolkitModulePath` pekar på en fungerande lokal PSAppDeployToolkit-paketering när `DisplayMode AppDeployToolkit` används
+- AppDeployToolkit-only rendering
+- Subtitle-detektering och fallback
+- protokollknappar och URI-validering
+- SQL-kontrakt, leasing och leveransflödeskompatibilitet

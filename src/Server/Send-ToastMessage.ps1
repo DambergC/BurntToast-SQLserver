@@ -22,7 +22,7 @@ param(
     [Parameter(HelpMessage='Optional button argument, typically an absolute URL or protocol URI.')][string]$ButtonArguments,
     [Parameter(HelpMessage='Button activation type. Use Protocol to open a URI or Dismiss to close the toast.')][ValidateSet('Protocol','Dismiss')][string]$ButtonActivationType,
     [ValidateSet('Default','Reminder','Alarm','IncomingCall')][string]$Scenario = 'Default',
-    [ValidateSet('BurntToast','Wpf','AppDeployToolkit')][string]$DisplayMode = 'BurntToast'
+    [ValidateSet('AppDeployToolkit')][string]$DisplayMode = 'AppDeployToolkit'
 )
 
 Set-StrictMode -Version Latest

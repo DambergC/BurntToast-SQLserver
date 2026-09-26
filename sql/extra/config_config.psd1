@@ -14,7 +14,7 @@
         'Servers'
     )
 
-    InternalPowerShellRepository = $null
+    AppDeployToolkitModulePath = $null
     Encrypt = $true
     TrustServerCertificate = $false
     ConnectTimeoutSeconds = 15
